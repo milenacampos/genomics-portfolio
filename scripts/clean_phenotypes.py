@@ -1,83 +1,54 @@
-"""
-clean_phenotypes.py
-Project P1 - Phenotype Explorer
-Milena Campos - Nellore GWAS project
-
-Usage:
-    python clean_phenotypes.py
-"""
-
+import logging
 import pandas as pd
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
-def clean_phenotypes(filepath, limits, output_path):
-    """
-    Load, validate, and clean a Nellore phenotype file.
+def load_data(filepath):
+    logging.info(f"Loading file: {filepath}")
+    try:
+        df = pd.read_csv(filepath, low_memory=False)
+        logging.info(f"Loaded {len(df):,} rows x {df.shape[1]} columns")
+        return df
+    except FileNotFoundError:
+        logging.error(f"File not found: {filepath}")
+        return None
+    except Exception as e:
+        logging.error(f"Unexpected error ({type(e).__name__}): {e}")
+        return None
 
-    Args:
-        filepath: path to raw CSV file
-        limits: dict of {trait: (min, max)} biological limits
-        output_path: where to save the clean CSV
+def filter_animals(df):
+    logging.info("Filtering pedigree-only rows (anoNt == 0)...")
+    before = len(df)
+    df_filtered = df[df['anoNt'] > 0].copy()
+    removed = before - len(df_filtered)
+    logging.info(f"Kept {len(df_filtered):,} animals, removed {removed:,} pedigree rows")
+    if removed == 0:
+        logging.warning("No pedigree rows removed — check if anoNt column is correct")
+    return df_filtered
 
-    Returns:
-        df_clean: cleaned DataFrame
-    """
-    print("=" * 50)
-    print("PHENOTYPE CLEANING PIPELINE")
-    print("=" * 50)
-
-    # Step 1: Load
-    print("\n[1/4] Loading data...")
-    df = pd.read_csv(filepath, low_memory=False)
-    print(f"      Loaded: {len(df):,} rows x {df.shape[1]} columns")
-
-    # Step 2: Filter pedigree-only rows
-    print("\n[2/4] Filtering pedigree-only rows...")
-    df_animals = df[df['anoNt'] > 0].copy()
-    removed = len(df) - len(df_animals)
-    print(f"      Kept: {len(df_animals):,} animals ({removed:,} pedigree rows removed)")
-
-    # Step 3: Remove outliers
-    print("\n[3/4] Removing biological outliers...")
-    df_clean = df_animals.copy()
-    total_outliers = 0
+def remove_outliers(df, limits):
+    logging.info("Removing biological outliers...")
+    total = 0
     for trait, (low, high) in limits.items():
-        before = df_clean[trait].notna().sum()
-        df_clean.loc[
-            (df_clean[trait] < low) | (df_clean[trait] > high), trait
-        ] = None
-        after = df_clean[trait].notna().sum()
-        n = before - after
-        total_outliers += n
-        print(f"      {trait}: {n:,} outliers removed (limits: {low}–{high} kg)")
-    print(f"      Total outliers removed: {total_outliers:,}")
+        before = df[trait].notna().sum()
+        df.loc[(df[trait] < low) | (df[trait] > high), trait] = None
+        removed = before - df[trait].notna().sum()
+        total += removed
+        logging.info(f"  {trait}: {removed} outliers removed")
+    logging.info(f"Total outliers removed: {total}")
+    return df
 
-    # Step 4: Summary report
-    print("\n[4/4] Summary report...")
-    for trait in limits.keys():
-        n = df_clean[trait].notna().sum()
-        mean = df_clean[trait].mean()
-        sd = df_clean[trait].std()
-        print(f"      {trait}: n={n:,}  mean={mean:.1f}  sd={sd:.1f}")
+# Run the full pipeline
+filepath = "/Users/milenacampos/Documents/projeto doc/DEFEITOS NELORE/pedigree+fenotipo.csv"
+limits = {'peson': (5, 60), 'pesod': (60, 400), 'pesos': (100, 600)}
 
-    # Save
-    df_clean.to_csv(output_path, index=False)
-    print(f"\nClean file saved to: {output_path}")
-    print("=" * 50)
-
-    return df_clean
-
-
-# ── Run when executed directly ──────────────────
-if __name__ == "__main__":
-
-    LIMITS = {
-        'peson': (5, 60),
-        'pesod': (60, 400),
-        'pesos': (100, 600),
-    }
-
-    INPUT  = '/Users/milenacampos/Documents/projeto doc/DEFEITOS NELORE/pedigree+fenotipo.csv'
-    OUTPUT = '/Users/milenacampos/Documents/projeto doc/DEFEITOS NELORE/pedigree+fenotipo_clean.csv'
-
-    df_clean = clean_phenotypes(INPUT, LIMITS, OUTPUT)
+df = load_data(filepath)
+if df is not None:
+    df = filter_animals(df)
+    df = remove_outliers(df, limits)
+    logging.info("Pipeline completed successfully!")
+else:
+    logging.error("Pipeline failed — could not load data")
